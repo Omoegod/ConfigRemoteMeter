@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -103,7 +104,9 @@ func (a *Application) update() {
 func getAvailablePorts() []string {
 	var ports []string
 	if runtime.GOOS == "windows" {
-		out, err := exec.Command("powershell", "-Command", "Get-WMIObject Win32_SerialPort | Select-Object -Expand DeviceID").Output()
+		cmd := exec.Command("powershell", "-Command", "Get-WMIObject Win32_SerialPort | Select-Object -Expand DeviceID")
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		out, err := cmd.Output()
 		if err == nil {
 			ports = strings.Split(strings.TrimSpace(string(out)), "\r\n")
 		}
@@ -307,7 +310,7 @@ func (a *Application) ShowSettingsWindow(w fyne.Window) {
 			return
 		}
 		num, err := strconv.Atoi(text)
-		if err != nil || num < 1 || num > 100 {
+		if err != nil || num < 1 || num > 2000 {
 			entry.SetText("1")
 		} else {
 			a.Config.QuantityRow = num
@@ -318,6 +321,7 @@ func (a *Application) ShowSettingsWindow(w fyne.Window) {
 		Items: []*widget.FormItem{
 			{Text: "Кол-во строк по-умолчанию", Widget: entry}},
 		OnSubmit: func() {
+
 			SaveConfig("config.json", a.Config)
 			log.Println("Установлено количество строк:", a.Config.QuantityRow)
 
@@ -325,13 +329,14 @@ func (a *Application) ShowSettingsWindow(w fyne.Window) {
 
 			settingsWindow.Close()
 		},
+		SubmitText: "Сохранить",
+		OnCancel: func() {
+			settingsWindow.Close()
+		},
+		CancelText: "Закрыть",
 	}
 
-	closeButton := widget.NewButton("Закрыть", func() {
-		settingsWindow.Close()
-	})
-
-	content := container.NewVBox(form, closeButton)
+	content := container.NewVBox(form)
 	settingsWindow.SetContent(content)
 
 	settingsWindow.Show()
