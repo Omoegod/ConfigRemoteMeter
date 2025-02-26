@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/tarm/serial"
 )
@@ -25,8 +29,8 @@ type entryRow struct {
 	check  *widget.Check
 }
 
-type configApp struct {
-	quantRow int
+type ConfigApp struct {
+	quantityrow int `json:"quantityrow"`
 }
 
 var currentPort *serial.Port
@@ -34,7 +38,34 @@ var portMutex sync.Mutex
 var isPortOpen bool = false
 var stopChannel chan bool
 
-const maxRowsPerColumn = 10
+func LoadConfig(filename string) (*ConfigApp, error) {
+	config := &ConfigApp{
+		quantityrow: 10,
+	}
+
+	file, err := os.Open(filename)
+	if err != nil {
+		SaveConfig(filename, config)
+		return config, nil
+	}
+
+	defer file.Close()
+
+	err = json.NewDecoder(file).Decode(config)
+
+	return config, nil
+}
+
+func SaveConfig(filename string, config *ConfigApp) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	return json.NewEncoder(file).Encode(config)
+}
 
 func getAvailablePorts() []string {
 	var ports []string
@@ -246,13 +277,61 @@ func closePort() {
 	}
 }
 
+func (c *ConfigApp) ShowSettingsWindow(w fyne.Window) {
+	settingsWindow := fyne.CurrentApp().NewWindow("Настройки")
+	settingsWindow.Resize(fyne.NewSize(350, 400))
+
+	label := widget.NewLabel("Настройки приложения")
+
+	entry := widget.NewEntry()
+
+	entry.OnChanged = func(text string) {
+		if text == "" {
+			return
+		}
+		num, err := strconv.Atoi(text)
+		if err != nil || num < 1 || num > 100 { // Проверяем границы
+			entry.SetText("")
+		}
+	}
+
+	form := &widget.Form{
+		Items: []*widget.FormItem{
+			{Text: "Кол-во строк по-умолчанию", Widget: entry}},
+		OnSubmit: func() { // optional, handle form submission
+			log.Println("Form submitted:", entry.Text)
+			num, err := strconv.Atoi(entry.Text)
+			if err == nil {
+				c.quantityrow = num
+
+				log.Println("Установлено количество строк:", c.quantityrow)
+			} else {
+				log.Println("Ошибка конвертации:", err)
+			}
+
+		},
+	}
+
+	closeButton := widget.NewButton("Закрыть", func() {
+		settingsWindow.Close()
+	})
+
+	content := container.NewVBox(label, form, closeButton)
+	settingsWindow.SetContent(content)
+
+	settingsWindow.Show()
+}
+
 func main() {
 
 	a := app.New()
 
 	w := a.NewWindow("Привязка пульта к счетчику")
 
-	w.Resize(fyne.NewSize(400, 600))
+	config, _ := LoadConfig("config.json")
+
+	w.Resize(fyne.NewSize(420, 800))
+	w.SetFixedSize(true)
 
 	ports := getAvailablePorts()
 
@@ -269,8 +348,6 @@ func main() {
 		dropdown.Refresh()
 	}
 
-	portDropdown.FocusLost()
-
 	go func() {
 		for {
 			time.Sleep(5 * time.Second)
@@ -284,36 +361,28 @@ func main() {
 		go openPort(selectedPort, openPortItem)
 	})
 
+	settingsButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+		config.ShowSettingsWindow(w)
+	})
+
 	topBar := container.NewHBox(
 		portDropdown,
 		openPortItem,
+		settingsButton,
 	)
 
 	wrappedTopBar := container.NewGridWrap(fyne.NewSize(400, 40), topBar)
 
-	columnContainer := container.NewHBox()
+	entryList := container.NewVBox()
 
-	newColumn := func() *fyne.Container {
-		entryList := container.NewVBox()
-		headerRow := container.NewHBox(
-			widget.NewLabelWithStyle("Номер счетчика", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Сетевой адрес", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("Подсеть", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		)
-
-		column := container.NewVBox(headerRow, entryList)
-		columnContainer.Add(column)
-		return entryList
-	}
-
-	currentEntryList := newColumn()
+	headerRow := container.NewHBox(
+		widget.NewLabelWithStyle("Номер счетчика", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Сетевой адрес", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Подсеть", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+	)
 
 	addEntryRow := func() {
-		if len(currentEntryList.Objects) >= maxRowsPerColumn {
-			currentEntryList = newColumn()
-			columnContainer.Refresh()
-		}
 
 		devNum := widget.NewEntry()
 		rfNum := widget.NewEntry()
@@ -321,7 +390,6 @@ func main() {
 		check := widget.NewCheck("", func(value bool) {
 			log.Println("Check set to", value)
 		})
-		// check.Disable()
 
 		devNum.OnChanged = func(text string) {
 			cleanText := strings.TrimSpace(text)
@@ -349,22 +417,33 @@ func main() {
 		row := &entryRow{devNum, rfNum, chNum, check}
 		entryRows = append(entryRows, row)
 
-		devNumContainer := container.NewGridWrap(fyne.NewSize(130, 40), devNum)
-		rfNumContainer := container.NewGridWrap(fyne.NewSize(115, 40), rfNum)
+		devNumContainer := container.NewGridWrap(fyne.NewSize(140, 40), devNum)
+		rfNumContainer := container.NewGridWrap(fyne.NewSize(125, 40), rfNum)
 		chNumContainer := container.NewGridWrap(fyne.NewSize(80, 40), chNum)
 		checkContainer := container.NewGridWrap(fyne.NewSize(40, 40), check)
 
 		entryRow := container.NewHBox(devNumContainer, rfNumContainer, chNumContainer, checkContainer)
 
-		currentEntryList.Add(entryRow)
-		currentEntryList.Refresh()
+		entryList.Add(entryRow)
+		entryList.Refresh()
 	}
 
 	addRowButton := widget.NewButton("Добавить строку", func() {
 		addEntryRow()
 	})
 
-	mainContainer := container.NewVBox(addRowButton, columnContainer)
+	addRowButtonMust := widget.NewButton(fmt.Sprintf("Добавить %d", config.quantityrow), func() {
+		for i := 0; i < config.quantityrow; i++ {
+			addEntryRow()
+		}
+	})
+
+	buttonRow := container.NewHBox(addRowButton, addRowButtonMust)
+
+	scrollableEntryList := container.NewVScroll(entryList)
+	scrollableEntryList.SetMinSize(fyne.NewSize(410, 650))
+
+	mainContainer := container.NewVBox(buttonRow, headerRow, scrollableEntryList)
 
 	w.SetContent(container.NewVBox(wrappedTopBar, mainContainer))
 
