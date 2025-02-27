@@ -24,6 +24,10 @@ import (
 	"github.com/tarm/serial"
 )
 
+var defaultNum = "00000000"
+var defaultRf = "00000"
+var defaultCh = "00"
+
 func removeEmptyLines(lines []string) []string {
 	var result []string
 	for _, line := range lines {
@@ -165,10 +169,15 @@ func (a *Application) readDataFromPort(port *serial.Port) {
 					payload = append(payload, summ)
 
 					data = append(data, payload...)
-
-					data = append(data, []byte(row.devNum.Text)...)
-					data = append(data, []byte(row.rfNum.Text)...)
-					data = append(data, []byte(row.chNum.Text)...)
+					if row.devNum.Text != "" {
+						data = append(data, []byte(row.devNum.Text)...)
+						data = append(data, []byte(row.rfNum.Text)...)
+						data = append(data, []byte(row.chNum.Text)...)
+					} else {
+						data = append(data, []byte(defaultNum)...)
+						data = append(data, []byte(defaultRf)...)
+						data = append(data, []byte(defaultCh)...)
+					}
 
 					crc := CalculateCRC16(data)
 					data = append(data, byte(crc), byte(crc>>8))
@@ -263,6 +272,12 @@ func (a *Application) AddEntryRow() {
 
 	devNum.OnChanged = func(text string) {
 		cleanText := strings.TrimSpace(text)
+		parts := strings.Split(cleanText, "-")
+
+		if len(parts) > 1 {
+			cleanText = parts[1]
+		}
+
 		if len(cleanText) > 8 {
 			cleanText = cleanText[:8]
 		}
@@ -363,11 +378,21 @@ func (a *Application) loadFromFile() {
 		a.EntryList.Objects = nil
 
 		for i, line := range lines {
+			cleanText := strings.TrimSpace(line)
+			parts := strings.Split(cleanText, "-")
+			if len(parts) > 1 {
+				cleanText = parts[len(parts)-1]
+			}
+
+			if len(cleanText) > 8 {
+				cleanText = cleanText[len(cleanText)-8:]
+			}
+
 			if i < len(a.EntryRows) {
-				a.EntryRows[i].devNum.SetText(strings.TrimSpace(line))
+				a.EntryRows[i].devNum.SetText(cleanText)
 			} else {
 				a.AddEntryRow()
-				a.EntryRows[i].devNum.SetText(strings.TrimSpace(line))
+				a.EntryRows[i].devNum.SetText(cleanText)
 			}
 		}
 
