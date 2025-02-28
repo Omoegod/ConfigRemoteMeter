@@ -272,10 +272,10 @@ func (a *Application) AddEntryRow() {
 
 	devNum.OnChanged = func(text string) {
 		cleanText := strings.TrimSpace(text)
-		parts := strings.Split(cleanText, "-")
+		parts := strings.Split(cleanText, ";")
 
 		if len(parts) > 1 {
-			cleanText = parts[1]
+			cleanText = parts[0]
 		}
 
 		if len(cleanText) > 8 {
@@ -379,13 +379,13 @@ func (a *Application) loadFromFile() {
 
 		for i, line := range lines {
 			cleanText := strings.TrimSpace(line)
-			parts := strings.Split(cleanText, "-")
+			parts := strings.Split(cleanText, ";")
 			if len(parts) > 1 {
-				cleanText = parts[len(parts)-1]
+				cleanText = parts[0]
 			}
 
 			if len(cleanText) > 8 {
-				cleanText = cleanText[len(cleanText)-8:]
+				cleanText = cleanText[:8]
 			}
 
 			if i < len(a.EntryRows) {
